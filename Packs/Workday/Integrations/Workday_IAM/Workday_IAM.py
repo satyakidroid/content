@@ -213,7 +213,7 @@ def is_display_name_already_taken(demisto_user, workday_user, display_name_to_us
             is_display_name_change = False
 
         if user.get(EMPLOYEE_ID_FIELD) != demisto_user.get(EMPLOYEE_ID_FIELD) \
-                and user.get(AD_ACCOUNT_STATUS_FIELD).lower() != 'terminated':
+                and user.get(AD_ACCOUNT_STATUS_FIELD, '').lower() != 'terminated':
             display_name_is_taken_by_another_user = True
 
     if display_name_is_taken_by_another_user and is_display_name_change:
