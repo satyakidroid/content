@@ -1,18 +1,18 @@
 args:
 - default: false
-  description: 'The incident ID in xsoar (used for mirrored events).'
+  description: 'The incident ID in Cortex XSOAR (used for mirrored events).'
   isArray: false
   name: incident_id
 - default: false
-  description: 'The notable ID in splunk SIEM.'
+  description: 'The notable event ID in the Splunk SIEM.'
   isArray: false
   name: notable_id
 - default: false
-  description: 'The comment body'
+  description: 'The body content of the comment.'
   isArray: false
   name: comment
   required: true
-comment: 'Add a comment to splunk notable event.'
+comment: 'Add a comment to the Splunk notable event.'
 commonfields:
   id: SplunkCommentNotableEvent
   version: -1
