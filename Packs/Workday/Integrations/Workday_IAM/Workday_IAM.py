@@ -560,10 +560,16 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
     """
     events = []
     user_emails = []
+    demisto.debug('WORKDAY: entered fetch_incidents function')
     try:
+        demisto.debug('WORKDAY: before getting all user profiles')
         display_name_to_user_profile, employee_id_to_user_profile, email_to_user_profile = get_all_user_profiles()
+        demisto.debug('WORKDAY: after getting all user profiles')
+        demisto.debug('WORKDAY: before getting full workday report')
         report_entries = client.get_full_report(report_url)
+        demisto.debug('WORKDAY: after getting full workday report')
 
+        demisto.debug('WORKDAY: before iterating report entries')
         for entry in report_entries:
             # get the user event (if exists) according to workday report
             workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
@@ -582,9 +588,12 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
             # we store all emails of user profiles for later use
             if demisto_user is not None:
                 user_emails.append(demisto_user.get(EMAIL_ADDRESS_FIELD))
+        demisto.debug('WORKDAY: after iterating report entries')
 
         # terminate users in XSOAR which are not on workday report
+        demisto.debug('WORKDAY: before getting orphan users')
         orphan_users_events = get_orphan_users(email_to_user_profile, user_emails, source_priority)
+        demisto.debug('WORKDAY: after getting orphan users')
         events.extend(orphan_users_events)
 
         if not events:
