@@ -66,9 +66,9 @@ def report_to_indicators(report_entries, mapper_in, workday_date_format, deactiv
 
     for entry in report_entries:
         workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
-        if not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
+        if is_report_missing_required_user_data(workday_user) \
+                or not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
                 or new_hire_email_already_taken(workday_user, None, email_to_user_profile) \
-                or is_report_missing_required_user_data(workday_user) \
                 or is_termination_event(workday_user, None, deactivation_date_field, first_run=True):
             continue
 
