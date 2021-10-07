@@ -508,7 +508,7 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
         events: Incidents/Events that will be created in Cortex XSOAR
     """
     events = []
-    number_of_fetched_events = 0
+    number_of_processed_events = 0
     demisto.debug('WORKDAY: entered process_report_entries function')
     try:
         demisto.debug('WORKDAY: before getting all user profiles')
@@ -516,7 +516,8 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
         demisto.debug('WORKDAY: after getting all user profiles')
 
         demisto.debug('WORKDAY: before iterating report entries')
-        for idx, entry in enumerate(report_entries):
+        for entry in report_entries:
+            number_of_processed_events += 1
             # get the user event (if exists) according to workday report
             workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
             demisto_user = get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user)
@@ -532,8 +533,9 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
                                       employee_id_to_user_profile, source_priority)
             if event is not None:
                 events.append(event)
-                if len(events) == fetch_limit or idx == number_of_entries_to_process - 1:
-                    break
+
+            if len(events) == fetch_limit or number_of_processed_events == number_of_entries_to_process - 1:
+                break
 
         demisto.debug('WORKDAY: after iterating report entries')
 
@@ -543,7 +545,7 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
     except Exception as e:
         demisto.error('Failed to fetch events. Reason: ' + str(e))
         raise e
-    unprocessed_report_entries = report_entries[:number_of_fetched_events]
+    unprocessed_report_entries = report_entries[number_of_processed_events:]
 
     return events, unprocessed_report_entries
 
