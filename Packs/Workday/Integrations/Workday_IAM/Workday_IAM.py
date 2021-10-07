@@ -172,7 +172,7 @@ def is_event_processed(demisto_user):
 
 
 def is_termination_event(workday_user, demisto_user, deactivation_date_field, first_run=False):
-    if not first_run and (demisto_user is None or demisto_user.get(AD_ACCOUNT_STATUS_FIELD) == 'Disabled'):
+    if not first_run and (demisto_user is None or demisto_user.get(AD_ACCOUNT_STATUS_FIELD, '') == 'Disabled'):
         # skipping termination check - user does not exist or already terminated
         return False
 
@@ -214,7 +214,7 @@ def is_display_name_already_taken(demisto_user, workday_user, display_name_to_us
             is_display_name_change = False
 
         if user.get(EMPLOYEE_ID_FIELD) != demisto_user.get(EMPLOYEE_ID_FIELD) \
-                and user.get(AD_ACCOUNT_STATUS_FIELD, '').lower() != 'terminated':
+                and user.get(AD_ACCOUNT_STATUS_FIELD, '') != 'Disabled':
             display_name_is_taken_by_another_user = True
 
     if display_name_is_taken_by_another_user and is_display_name_change:
@@ -250,7 +250,7 @@ def is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
 
 
 def is_rehire_event(demisto_user, workday_user, changed_fields):
-    if demisto_user is None or demisto_user.get(AD_ACCOUNT_STATUS_FIELD) != 'Disabled':
+    if demisto_user is None or demisto_user.get(AD_ACCOUNT_STATUS_FIELD, '') != 'Disabled':
         # skipping rehire check - user does not exist or already active/pending
         return False
     prehire_flag = workday_user.get(PREHIRE_FLAG_FIELD, '').lower() == 'true'
