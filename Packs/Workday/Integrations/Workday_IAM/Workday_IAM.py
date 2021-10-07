@@ -347,9 +347,9 @@ def get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday
     return demisto_user
 
 
-def get_orphan_users_events(email_to_user_profile, user_emails, source_priority):
+def get_orphan_users_events(user_emails, source_priority):
     """ Gets all users that don't exist in the Workday report anymore and terminate them in XSOAR. """
-
+    _, _, email_to_user_profile = get_all_user_profiles()
     events = []
     orphan_users = [email for email, user in email_to_user_profile.items()
                     if email not in user_emails and user.get(EMPLOYMENT_STATUS_FIELD) != 'Terminated'
@@ -376,18 +376,6 @@ def get_orphan_users_events(email_to_user_profile, user_emails, source_priority)
             events.append(event)
 
     return events
-
-
-def fetch_orphan_users(client, report_url, source_priority, last_run, fetch_limit):
-    if not (orphan_user_events := last_run.get('orphan_user_events')):
-        report_entries = client.get_full_report(report_url)
-        user_emails = [user.get('Email_Address') for user in report_entries]
-        _, _, email_to_user_profile = get_all_user_profiles()
-        orphan_user_events = get_orphan_users_events(email_to_user_profile, user_emails, source_priority)
-    
-    events = orphan_user_events[:fetch_limit]
-    last_run['orphan_user_events'] = orphan_user_events[fetch_limit:]
-    return events, last_run
 
 
 def get_profile_changed_fields_str(demisto_user, workday_user):
@@ -500,7 +488,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 def process_report_entries(mapper_in, workday_date_format, deactivation_date_field,
                            days_before_hire_to_sync, days_before_hire_to_enable_ad,
                            source_priority, report_entries, fetch_limit,
-                           number_of_entries_to_process):
+                           number_of_entries_to_process, user_emails):
     """
     Iterates over the given report entries and processes them into XSOAR IAM events.
 
@@ -514,6 +502,7 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
         source_priority: Source priority level.
         report_entries: Unproccessed report entries.
         fetch_limit: Maximal number of events to retrieve.
+        user_emails: An aggregated list of the user emails in the Workday report. Used to detect orphan users.
 
     Returns:
         events: Incidents/Events that will be created in Cortex XSOAR
@@ -532,8 +521,10 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
             workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
             demisto_user = get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user)
 
-            demisto.debug(f'Getting event details for user with email address {workday_user.get("email")}.\n'
+            user_email = workday_user.get(EMAIL_ADDRESS_FIELD)
+            demisto.debug(f'Getting event details for user with email address {user_email}.\n'
                           f'Current user data in XSOAR: {demisto_user=}\nData in Workday: {workday_user=}')
+            user_emails.append(user_email)
 
             event = get_event_details(entry, workday_user, demisto_user, days_before_hire_to_sync,
                                       days_before_hire_to_enable_ad, deactivation_date_field,
@@ -613,7 +604,7 @@ def get_full_report_command(client, mapper_in, report_url, workday_date_format, 
 
 def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactivation_date_field,
                     days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority,
-                    last_run, fetch_limit, processed_entries_percentage_per_fetch, fetch_orphans_mode):
+                    last_run, fetch_limit, processed_entries_percentage_per_fetch):
     """
     This function will execute each interval (default is 1 minute).
 
@@ -627,26 +618,37 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
         days_before_hire_to_enable_ad: Number of days before hire date to enable Active Directory account,
                                        `None` if should sync instantly.
         source_priority: Source priority level.
-        last_run: A Dictionary containing the unproccessed report entries from the previous run.
+        last_run: A Dictionary containing information from the previous fetch run.
         fetch_limit: Maximal number of events to retrieve.
         processed_entries_percentage_per_fetch: Percentage of entries to process per fetch.
-        fetch_orphans_mode: A boolean indicating whether or not the fetch command should trigger orphan users
-                            termination events.
 
     Returns:
         events: Incidents/Events that will be created in Cortex XSOAR
-        report_entries: Unproccessed report entries.
+        last_run: A Dictionary containing information from the current fetch run.
     """
-    if fetch_orphans_mode:
-        return fetch_orphan_users(client, report_url, source_priority, last_run, fetch_limit)
-    report_entries = last_run.get('report_entries', [])
-    number_of_entries_to_process = last_run.get('number_of_entries_to_process', BATCH_SIZE)
+    user_emails_for_orphans_detection = last_run.get('user_emails', [])
 
-    if not report_entries:
+    if not last_run.get('report_entries', []):
+        if user_emails_for_orphans_detection:
+            last_run['orphan_users_events'] = get_orphan_users_events(user_emails_for_orphans_detection, source_priority)
+
+        if orphan_user_events := last_run.get('orphan_users_events'):
+            last_run['orphan_users_events'] = orphan_user_events[fetch_limit:]
+            return orphan_user_events[:fetch_limit], last_run
+
         demisto.debug('WORKDAY: before getting full workday report')
         report_entries = client.get_full_report(report_url)
-        number_of_entries_to_process = len(report_entries) * processed_entries_percentage_per_fetch
         demisto.debug('WORKDAY: after getting full workday report')
+
+        last_run.update({
+            'report_entries': report_entries,
+            'number_of_entries_to_process': len(report_entries) * processed_entries_percentage_per_fetch,
+            'orphan_users_events': orphan_user_events[fetch_limit:],
+            'user_emails': []
+        })
+
+    report_entries = last_run.get('report_entries', [])
+    number_of_entries_to_process = last_run.get('number_of_entries_to_process', BATCH_SIZE)
 
     events, unprocessed_report_entries = process_report_entries(
         mapper_in,
@@ -657,16 +659,18 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
         source_priority,
         report_entries,
         fetch_limit,
-        number_of_entries_to_process
+        number_of_entries_to_process,
+        user_emails_for_orphans_detection,
     )
 
-    next_run = {
+    last_run.update({
         'synced_users': True,
         'report_entries': unprocessed_report_entries,
-        'number_of_entries_to_process': number_of_entries_to_process
-    }
+        'number_of_entries_to_process': number_of_entries_to_process,
+        'user_emails': user_emails_for_orphans_detection
+    })
 
-    return events, next_run
+    return events, last_run
 
 
 def workday_first_run_command(client, mapper_in, report_url, workday_date_format, deactivation_date_field,
@@ -686,9 +690,6 @@ def test_module(client, is_fetch, report_url, mapper_in, workday_date_format,
     Returning 'ok' indicates that the integration works like it is supposed to. Connection to the service is successful.
     Anything else will fail the test.
     """
-
-    
-
     # test API connectivity
     client.get_full_report(report_url)
 
@@ -804,7 +805,6 @@ def main():
                         last_run=last_run,
                         fetch_limit=fetch_limit,
                         processed_entries_percentage_per_fetch=processed_entries_percentage_per_fetch,
-                        fetch_orphans_mode=fetch_orphans_mode,
                     )
 
                 demisto.incidents(events)
