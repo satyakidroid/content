@@ -30,7 +30,6 @@ DATE_FORMAT = "%m/%d/%Y"
 READ_TIME_OUT_IN_SECONDS = 300
 DEFAULT_MAPPER_IN = 'IAM Sync User - Workday'
 BATCH_SIZE = 2000
-DEFAULT_MAX_FETCH = 200
 
 NEW_HIRE_EVENT_TYPE = 'IAM - New Hire'
 UPDATE_USER_EVENT_TYPE = 'IAM - Update User'
@@ -697,6 +696,7 @@ def main():
     deactivation_date_field = params.get('deactivation_date_field').lower().replace('_', '')
     source_priority = int(params.get('source_priority', '1'))
     fetch_limit = int(params.get('max_fetch'))
+    fetch_orphans_mode = params.get('fetch_orphans_mode', False)
 
     days_before_hire_to_sync = params.get('days_before_hire_to_sync')
     if days_before_hire_to_sync:
@@ -772,7 +772,8 @@ def main():
                         days_before_hire_to_enable_ad=days_before_hire_to_enable_ad,
                         source_priority=source_priority,
                         last_run=last_run,
-                        fetch_limit=fetch_limit
+                        fetch_limit=fetch_limit,
+                        fetch_orphans_mode=fetch_orphans_mode,
                     )
 
                     demisto.incidents(events)
