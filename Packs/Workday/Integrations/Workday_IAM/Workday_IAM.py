@@ -378,7 +378,6 @@ def get_orphan_users(email_to_user_profile, user_emails, source_priority):
     return events
 
 
-# todo: complete call to method, yml and test
 def fetch_orphan_users_command(client, args, report_url, source_priority, last_run, fetch_limit):
     if not (orphan_user_events := last_run.get('orphan_user_events')):
         email_address_field = args.get('email_address_field', 'Email_Address')
@@ -555,7 +554,7 @@ def get_full_report_command(client, mapper_in, report_url, workday_date_format, 
 
 def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactivation_date_field,
                     days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority,
-                    last_run, fetch_limit):
+                    last_run, fetch_limit, fetch_orphans_mode):
     """
     This function will execute each interval (default is 1 minute).
 
@@ -570,6 +569,8 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
                                        `None` if should sync instantly.
         source_priority: Source priority level.
         last_run: A Dictionary containing the unproccessed report entries from the previous run.
+        fetch_orphans_mode: A boolean indicating whether or not the fetch command should trigger orphan users
+                            termination events.
 
     Returns:
         events: Incidents/Events that will be created in Cortex XSOAR
