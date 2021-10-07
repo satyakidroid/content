@@ -46,7 +46,7 @@ configuration:
     trigger termination events for active User Profiles in XSOAR that don't exist in 
     the given Workday report.
   defaultvalue: 'false'
-  display: Fetch orphan termination events
+  display: Fetch orphans termination events
   name: fetch_orphans_mode
   required: false
   type: 8
