@@ -508,16 +508,16 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
         events: Incidents/Events that will be created in Cortex XSOAR
     """
     events = []
-    number_of_processed_events = 0
+    number_of_processed_entries = 0
     demisto.debug('WORKDAY: entered process_report_entries function')
     try:
         demisto.debug('WORKDAY: before getting all user profiles')
         display_name_to_user_profile, employee_id_to_user_profile, email_to_user_profile = get_all_user_profiles()
         demisto.debug('WORKDAY: after getting all user profiles')
 
-        demisto.debug('WORKDAY: before iterating report entries')
+        demisto.debug('Starting to process Workday report entries')
         for entry in report_entries:
-            number_of_processed_events += 1
+            number_of_processed_entries += 1
             # get the user event (if exists) according to workday report
             workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
             demisto_user = get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user)
@@ -534,10 +534,10 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
             if event is not None:
                 events.append(event)
 
-            if len(events) == fetch_limit or number_of_processed_events == number_of_entries_to_process - 1:
+            if len(events) == fetch_limit or number_of_processed_entries == number_of_entries_to_process - 1:
                 break
 
-        demisto.debug('WORKDAY: after iterating report entries')
+        demisto.debug(f'Processed {number_of_processed_entries} Workday entries.')
 
         if not events:
             demisto.info('Did not detect any changes in the current Workday report entries batch.')
@@ -545,7 +545,7 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
     except Exception as e:
         demisto.error('Failed to fetch events. Reason: ' + str(e))
         raise e
-    unprocessed_report_entries = report_entries[number_of_processed_events:]
+    unprocessed_report_entries = report_entries[number_of_processed_entries:]
 
     return events, unprocessed_report_entries
 
@@ -628,11 +628,9 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
         events: Incidents/Events that will be created in Cortex XSOAR
         last_run: A Dictionary containing information from the current fetch run.
     """
-    user_emails_for_orphans_detection = last_run.get('user_emails', [])
-
     if not last_run.get('report_entries', []):
-        if user_emails_for_orphans_detection:
-            last_run['orphan_users_events'] = get_orphan_users_events(user_emails_for_orphans_detection, source_priority)
+        if user_emails := last_run.get('user_emails', []):
+            last_run['orphan_users_events'] = get_orphan_users_events(user_emails, source_priority)
 
         if orphan_user_events := last_run.get('orphan_users_events'):
             last_run['orphan_users_events'] = orphan_user_events[fetch_limit:]
@@ -645,12 +643,8 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
         last_run.update({
             'report_entries': report_entries,
             'number_of_entries_to_process': len(report_entries) * processed_entries_percentage_per_fetch,
-            'orphan_users_events': orphan_user_events[fetch_limit:],
             'user_emails': []
         })
-
-    report_entries = last_run.get('report_entries', [])
-    number_of_entries_to_process = last_run.get('number_of_entries_to_process', BATCH_SIZE)
 
     events, unprocessed_report_entries = process_report_entries(
         mapper_in,
@@ -659,17 +653,15 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
         days_before_hire_to_sync,
         days_before_hire_to_enable_ad,
         source_priority,
-        report_entries,
-        fetch_limit,
-        number_of_entries_to_process,
-        user_emails_for_orphans_detection,
+        report_entries=last_run.get('report_entries', []),
+        fetch_limit=fetch_limit,
+        number_of_entries_to_process=last_run.get('number_of_entries_to_process', BATCH_SIZE),
+        user_emails=last_run.get('user_emails', [])
     )
 
     last_run.update({
         'synced_users': True,
-        'report_entries': unprocessed_report_entries,
-        'number_of_entries_to_process': number_of_entries_to_process,
-        'user_emails': user_emails_for_orphans_detection
+        'report_entries': unprocessed_report_entries
     })
 
     return events, last_run
@@ -730,7 +722,6 @@ def main():
     source_priority = int(params.get('source_priority', '1'))
     fetch_limit = int(params.get('max_fetch', '50'))
     processed_entries_percentage_per_fetch = float(params.get('processed_entries_percentage', '50')) / 100
-    fetch_orphans_mode = params.get('fetch_orphans_mode', False)
 
     days_before_hire_to_sync = params.get('days_before_hire_to_sync')
     if days_before_hire_to_sync:
