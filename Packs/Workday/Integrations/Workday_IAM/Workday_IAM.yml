@@ -16,6 +16,15 @@ configuration:
   name: max_fetch
   required: false
   type: 0
+- additionalinfo: Advanced input - a number between 1 and 100 representing the percentage 
+    of the report that will be checked for changes each time a fetch is executed. For every fetch, 
+    that part of the report will be checked until 100% of the report was checked for changes. 
+    If you are experiencing performance issues with the integration, you can try a lower value.
+  defaultvalue: '50'
+  display: Percentage of entries to process per fetch
+  name: processed_entries_percentage
+  required: false
+  type: 0
 - display: Fetch incidents
   name: isFetch
   required: false

@@ -498,8 +498,9 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
 
 def process_report_entries(mapper_in, workday_date_format, deactivation_date_field,
-                           days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority,
-                           report_entries):
+                           days_before_hire_to_sync, days_before_hire_to_enable_ad,
+                           source_priority, report_entries, fetch_limit,
+                           number_of_entries_to_process):
     """
     Iterates over the given report entries and processes them into XSOAR IAM events.
 
@@ -512,11 +513,13 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
                                         `None` if should sync instantly.
         source_priority: Source priority level.
         report_entries: Unproccessed report entries.
+        fetch_limit: Maximal number of events to retrieve.
 
     Returns:
         events: Incidents/Events that will be created in Cortex XSOAR
     """
     events = []
+    number_of_fetched_events = 0
     demisto.debug('WORKDAY: entered process_report_entries function')
     try:
         demisto.debug('WORKDAY: before getting all user profiles')
@@ -524,7 +527,7 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
         demisto.debug('WORKDAY: after getting all user profiles')
 
         demisto.debug('WORKDAY: before iterating report entries')
-        for entry in report_entries:
+        for idx, entry in enumerate(report_entries):
             # get the user event (if exists) according to workday report
             workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
             demisto_user = get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user)
@@ -538,6 +541,8 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
                                       employee_id_to_user_profile, source_priority)
             if event is not None:
                 events.append(event)
+                if len(events) == fetch_limit or idx == number_of_entries_to_process - 1:
+                    break
 
         demisto.debug('WORKDAY: after iterating report entries')
 
@@ -547,8 +552,9 @@ def process_report_entries(mapper_in, workday_date_format, deactivation_date_fie
     except Exception as e:
         demisto.error('Failed to fetch events. Reason: ' + str(e))
         raise e
+    unprocessed_report_entries = report_entries[:number_of_fetched_events]
 
-    return events
+    return events, unprocessed_report_entries
 
 
 ''' INTEGRATION COMMANDS '''
@@ -607,7 +613,7 @@ def get_full_report_command(client, mapper_in, report_url, workday_date_format, 
 
 def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactivation_date_field,
                     days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority,
-                    last_run, fetch_limit, fetch_orphans_mode):
+                    last_run, fetch_limit, processed_entries_percentage_per_fetch, fetch_orphans_mode):
     """
     This function will execute each interval (default is 1 minute).
 
@@ -622,6 +628,8 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
                                        `None` if should sync instantly.
         source_priority: Source priority level.
         last_run: A Dictionary containing the unproccessed report entries from the previous run.
+        fetch_limit: Maximal number of events to retrieve.
+        processed_entries_percentage_per_fetch: Percentage of entries to process per fetch.
         fetch_orphans_mode: A boolean indicating whether or not the fetch command should trigger orphan users
                             termination events.
 
@@ -632,17 +640,31 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
     if fetch_orphans_mode:
         return fetch_orphan_users(client, report_url, source_priority, last_run, fetch_limit)
     report_entries = last_run.get('report_entries', [])
+    number_of_entries_to_process = last_run.get('number_of_entries_to_process', BATCH_SIZE)
+
     if not report_entries:
         demisto.debug('WORKDAY: before getting full workday report')
         report_entries = client.get_full_report(report_url)
+        number_of_entries_to_process = len(report_entries) * processed_entries_percentage_per_fetch
         demisto.debug('WORKDAY: after getting full workday report')
 
-    entries_to_process = report_entries[:fetch_limit]
-    events = process_report_entries(mapper_in, workday_date_format, deactivation_date_field,
-                                    days_before_hire_to_sync, days_before_hire_to_enable_ad,
-                                    source_priority, entries_to_process)
+    events, unprocessed_report_entries = process_report_entries(
+        mapper_in,
+        workday_date_format,
+        deactivation_date_field,
+        days_before_hire_to_sync,
+        days_before_hire_to_enable_ad,
+        source_priority,
+        report_entries,
+        fetch_limit,
+        number_of_entries_to_process
+    )
 
-    next_run = {'synced_users': True, 'report_entries': report_entries[fetch_limit:]}
+    next_run = {
+        'synced_users': True,
+        'report_entries': unprocessed_report_entries,
+        'number_of_entries_to_process': number_of_entries_to_process
+    }
 
     return events, next_run
 
@@ -655,6 +677,8 @@ def workday_first_run_command(client, mapper_in, report_url, workday_date_format
     for b in batch(indicators, batch_size=BATCH_SIZE):
         demisto.createIndicators(b)
 
+    return [], {'synced_users': True}
+
 
 def test_module(client, is_fetch, report_url, mapper_in, workday_date_format,
                 days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority):
@@ -662,6 +686,8 @@ def test_module(client, is_fetch, report_url, mapper_in, workday_date_format,
     Returning 'ok' indicates that the integration works like it is supposed to. Connection to the service is successful.
     Anything else will fail the test.
     """
+
+    
 
     # test API connectivity
     client.get_full_report(report_url)
@@ -677,7 +703,9 @@ def test_module(client, is_fetch, report_url, mapper_in, workday_date_format,
             deactivation_date_field=TERMINATION_DATE_FIELD,
             source_priority=source_priority,
             last_run={},
-            fetch_limit=1
+            fetch_limit=1,
+            processed_entries_percentage_per_fetch=50,
+            fetch_orphans_mode=False
         )
 
     return 'ok'
@@ -697,7 +725,8 @@ def main():
     workday_date_format = params.get('workday_date_format', DATE_FORMAT)
     deactivation_date_field = params.get('deactivation_date_field').lower().replace('_', '')
     source_priority = int(params.get('source_priority', '1'))
-    fetch_limit = int(params.get('max_fetch'))
+    fetch_limit = int(params.get('max_fetch', '50'))
+    processed_entries_percentage_per_fetch = float(params.get('processed_entries_percentage', '50')) / 100
     fetch_orphans_mode = params.get('fetch_orphans_mode', False)
 
     days_before_hire_to_sync = params.get('days_before_hire_to_sync')
@@ -751,7 +780,7 @@ def main():
 
             else:
                 if not last_run.get('synced_users') and params.get('first_run'):
-                    workday_first_run_command(
+                    events, last_run = workday_first_run_command(
                         client=client,
                         mapper_in=mapper_in,
                         report_url=report_url,
@@ -761,7 +790,6 @@ def main():
                         days_before_hire_to_enable_ad=days_before_hire_to_enable_ad,
                         source_priority=source_priority
                     )
-                    demisto.setLastRun({'synced_users': True})
                 else:
                     # Get the events from Workday by making an API call. Last run is updated only when API call is made
                     events, last_run = fetch_incidents(
@@ -775,11 +803,12 @@ def main():
                         source_priority=source_priority,
                         last_run=last_run,
                         fetch_limit=fetch_limit,
+                        processed_entries_percentage_per_fetch=processed_entries_percentage_per_fetch,
                         fetch_orphans_mode=fetch_orphans_mode,
                     )
 
-                    demisto.incidents(events)
-                    demisto.setLastRun(last_run)
+                demisto.incidents(events)
+                demisto.setLastRun(last_run)
 
     except Exception as e:
         return_error(f'Failed to execute {demisto.command()} command, Error: {e}. Traceback: {traceback.format_exc()}')
