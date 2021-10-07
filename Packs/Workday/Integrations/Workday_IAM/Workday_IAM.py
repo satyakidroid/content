@@ -347,7 +347,7 @@ def get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday
     return demisto_user
 
 
-def get_orphan_users(email_to_user_profile, user_emails, source_priority):
+def get_orphan_users_events(email_to_user_profile, user_emails, source_priority):
     """ Gets all users that don't exist in the Workday report anymore and terminate them in XSOAR. """
 
     events = []
@@ -378,13 +378,12 @@ def get_orphan_users(email_to_user_profile, user_emails, source_priority):
     return events
 
 
-def fetch_orphan_users_command(client, args, report_url, source_priority, last_run, fetch_limit):
+def fetch_orphan_users(client, report_url, source_priority, last_run, fetch_limit):
     if not (orphan_user_events := last_run.get('orphan_user_events')):
-        email_address_field = args.get('email_address_field', 'Email_Address')
         report_entries = client.get_full_report(report_url)
-        user_emails = [user.get(email_address_field) for user in report_entries]
+        user_emails = [user.get('Email_Address') for user in report_entries]
         _, _, email_to_user_profile = get_all_user_profiles()
-        orphan_user_events = get_orphan_users(email_to_user_profile, user_emails, source_priority)
+        orphan_user_events = get_orphan_users_events(email_to_user_profile, user_emails, source_priority)
     
     events = orphan_user_events[:fetch_limit]
     last_run['orphan_user_events'] = orphan_user_events[fetch_limit:]
@@ -498,6 +497,60 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
     }
 
 
+def process_report_entries(mapper_in, workday_date_format, deactivation_date_field,
+                           days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority,
+                           report_entries):
+    """
+    Iterates over the given report entries and processes them into XSOAR IAM events.
+
+    Args:
+        mapper_in: Incoming mapper's name
+        workday_date_format: Date format in Workday report.
+        deactivation_date_field: Deactivation date field - "lastdayofwork" or "terminationdate".
+        days_before_hire_to_sync: Number of days before hire date to sync hires, `None` if should sync instantly.
+        days_before_hire_to_enable_ad: Number of days before hire date to enable Active Directory account,
+                                        `None` if should sync instantly.
+        source_priority: Source priority level.
+        report_entries: Unproccessed report entries.
+
+    Returns:
+        events: Incidents/Events that will be created in Cortex XSOAR
+    """
+    events = []
+    demisto.debug('WORKDAY: entered process_report_entries function')
+    try:
+        demisto.debug('WORKDAY: before getting all user profiles')
+        display_name_to_user_profile, employee_id_to_user_profile, email_to_user_profile = get_all_user_profiles()
+        demisto.debug('WORKDAY: after getting all user profiles')
+
+        demisto.debug('WORKDAY: before iterating report entries')
+        for entry in report_entries:
+            # get the user event (if exists) according to workday report
+            workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
+            demisto_user = get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user)
+
+            demisto.debug(f'Getting event details for user with email address {workday_user.get("email")}.\n'
+                          f'Current user data in XSOAR: {demisto_user=}\nData in Workday: {workday_user=}')
+
+            event = get_event_details(entry, workday_user, demisto_user, days_before_hire_to_sync,
+                                      days_before_hire_to_enable_ad, deactivation_date_field,
+                                      display_name_to_user_profile, email_to_user_profile,
+                                      employee_id_to_user_profile, source_priority)
+            if event is not None:
+                events.append(event)
+
+        demisto.debug('WORKDAY: after iterating report entries')
+
+        if not events:
+            demisto.info('Did not detect any changes in the current Workday report entries batch.')
+
+    except Exception as e:
+        demisto.error('Failed to fetch events. Reason: ' + str(e))
+        raise e
+
+    return events
+
+
 ''' INTEGRATION COMMANDS '''
 
 
@@ -576,6 +629,8 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
         events: Incidents/Events that will be created in Cortex XSOAR
         report_entries: Unproccessed report entries.
     """
+    if fetch_orphans_mode:
+        return fetch_orphan_users(client, report_url, source_priority, last_run, fetch_limit)
     report_entries = last_run.get('report_entries', [])
     if not report_entries:
         demisto.debug('WORKDAY: before getting full workday report')
@@ -590,60 +645,6 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
     next_run = {'synced_users': True, 'report_entries': report_entries[fetch_limit:]}
 
     return events, next_run
-
-
-def process_report_entries(mapper_in, workday_date_format, deactivation_date_field,
-                           days_before_hire_to_sync, days_before_hire_to_enable_ad, source_priority,
-                           report_entries):
-    """
-    Iterates over the given report entries and processes them into XSOAR IAM events.
-
-    Args:
-        mapper_in: Incoming mapper's name
-        workday_date_format: Date format in Workday report.
-        deactivation_date_field: Deactivation date field - "lastdayofwork" or "terminationdate".
-        days_before_hire_to_sync: Number of days before hire date to sync hires, `None` if should sync instantly.
-        days_before_hire_to_enable_ad: Number of days before hire date to enable Active Directory account,
-                                        `None` if should sync instantly.
-        source_priority: Source priority level.
-        report_entries: Unproccessed report entries.
-
-    Returns:
-        events: Incidents/Events that will be created in Cortex XSOAR
-    """
-    events = []
-    demisto.debug('WORKDAY: entered process_report_entries function')
-    try:
-        demisto.debug('WORKDAY: before getting all user profiles')
-        display_name_to_user_profile, employee_id_to_user_profile, email_to_user_profile = get_all_user_profiles()
-        demisto.debug('WORKDAY: after getting all user profiles')
-
-        demisto.debug('WORKDAY: before iterating report entries')
-        for entry in report_entries:
-            # get the user event (if exists) according to workday report
-            workday_user = get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_priority)
-            demisto_user = get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user)
-
-            demisto.debug(f'Getting event details for user with email address {workday_user.get("email")}.\n'
-                          f'Current user data in XSOAR: {demisto_user=}\nData in Workday: {workday_user=}')
-
-            event = get_event_details(entry, workday_user, demisto_user, days_before_hire_to_sync,
-                                      days_before_hire_to_enable_ad, deactivation_date_field,
-                                      display_name_to_user_profile, email_to_user_profile,
-                                      employee_id_to_user_profile, source_priority)
-            if event is not None:
-                events.append(event)
-
-        demisto.debug('WORKDAY: after iterating report entries')
-
-        if not events:
-            demisto.info('Did not detect any changes in the current Workday report entries batch.')
-
-    except Exception as e:
-        demisto.error('Failed to fetch events. Reason: ' + str(e))
-        raise e
-
-    return events
 
 
 def workday_first_run_command(client, mapper_in, report_url, workday_date_format, deactivation_date_field,
