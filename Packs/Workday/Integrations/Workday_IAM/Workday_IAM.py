@@ -248,14 +248,20 @@ def is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
     return False
 
 
-def is_rehire_event(demisto_user, workday_user, changed_fields):
+def is_rehire_event(demisto_user, workday_user, changed_fields, deactivation_date_field):
     if demisto_user is None or demisto_user.get(AD_ACCOUNT_STATUS_FIELD, '') != 'Disabled':
         # skipping rehire check - user does not exist or already active/pending
         return False
     prehire_flag = workday_user.get(PREHIRE_FLAG_FIELD, '').lower() == 'true'
     is_rehired_employee = workday_user.get(REHIRED_EMPLOYEE_FIELD, '').lower() == 'yes'
 
-    if prehire_flag is True and is_rehired_employee and changed_fields is not None:
+    if (deactivation_date := workday_user.get(deactivation_date_field)):
+        deactivation_date = dateparser.parse(workday_user.get(deactivation_date_field))
+    today = datetime.today()
+
+    if prehire_flag is True and is_rehired_employee and changed_fields \
+            or (deactivation_date_field in changed_fields \
+                and (not deactivation_date or deactivation_date > today)):
         demisto.debug(f'A rehire event was detected for user '
                       f'with email address {workday_user.get(EMAIL_ADDRESS_FIELD)}.')
         return True
@@ -380,14 +386,15 @@ def get_orphan_users_events(user_emails, source_priority):
 
 def get_profile_changed_fields_str(demisto_user, workday_user):
     if not demisto_user:
-        return None
-    profile_changed_fields = []
+        return None, None
+    changed_fields = {}
 
     for field, workday_value in workday_user.items():
         if (workday_value and not demisto_user.get(field)) or workday_value != demisto_user.get(field):
-            profile_changed_fields.append([field, workday_value])
+            changed_fields[field] = workday_value
 
-    return '\n'.join([f'{field[0]} field was updated to "{field[1]}".' for field in profile_changed_fields])
+    changed_fields_str = '\n'.join([f'{k} field was updated to "{v}".' for k, v in changed_fields.items()])
+    return changed_fields, changed_fields_str
 
 
 def is_valid_source_of_truth(demisto_user, source_priority):
@@ -423,8 +430,8 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
         event: The event details.
     """
     user_email = workday_user.get(EMAIL_ADDRESS_FIELD)
-    changed_fields = get_profile_changed_fields_str(demisto_user, workday_user)
-    demisto.debug(f'{changed_fields=}')
+    changed_fields, changed_fields_str = get_profile_changed_fields_str(demisto_user, workday_user)
+    demisto.debug(f'{changed_fields_str=}')
 
     if not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
             or new_hire_email_already_taken(workday_user, demisto_user, email_to_user_profile) \
@@ -445,7 +452,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
         event_type = DEACTIVATE_AD_EVENT_TYPE
         event_details = 'Active Directory user account was disabled due to hire date postponement.'
 
-    elif is_rehire_event(demisto_user, workday_user, changed_fields):
+    elif is_rehire_event(demisto_user, workday_user, changed_fields, deactivation_date_field):
         event_type = REHIRE_USER_EVENT_TYPE
         event_details = 'The user has been rehired.'
 
@@ -455,12 +462,12 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
     elif is_update_event(workday_user, changed_fields):
         event_type = UPDATE_USER_EVENT_TYPE
-        event_details = f'The user has been updated:\n{changed_fields}'
+        event_details = f'The user has been updated:\n{changed_fields_str}'
         workday_user[OLD_USER_DATA_FIELD] = demisto_user
 
         if demisto_user.get(SOURCE_PRIORITY_FIELD) != source_priority:
             workday_user[CONVERSION_HIRE_FIELD] = True
-            event_details = f'A conversion hire was detected:\n{changed_fields}'
+            event_details = f'A conversion hire was detected:\n{changed_fields_str}'
 
     else:
         demisto.debug(f'Could not detect changes in report for user with email address {user_email} - skipping.')
@@ -473,10 +480,11 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
             and event_type in [NEW_HIRE_EVENT_TYPE, REHIRE_USER_EVENT_TYPE, UPDATE_USER_EVENT_TYPE]:
         event_details = f'Detected an "{event_type}" event, but display name already exists. Please review.'
         if changed_fields:
-            event_details += f'\n{changed_fields}'
+            event_details += f'\n{changed_fields_str}'
         event_type = DEFAULT_INCIDENT_TYPE
 
-    entry[USER_PROFILE_INC_FIELD] = workday_user
+    entry[USER_PROFILE_INC_FIELD] = {**(demisto_user or {}), **workday_user}
+
     return {
         'name': user_email,
         'rawJSON': json.dumps(entry),
