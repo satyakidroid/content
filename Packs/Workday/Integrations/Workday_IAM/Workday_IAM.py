@@ -306,7 +306,7 @@ def is_update_event(workday_user, changed_fields):
 
 
 def should_force_sync(demisto_user):
-    if demisto_user and demisto_user.get(FORCE_SYNC_FIELD, '').lower() == 'true':
+    if demisto_user and demisto_user.get(FORCE_SYNC_FIELD) is True:
         demisto.debug(f'Forcing user sync for user '
                       f'with email address {demisto_user.get(EMAIL_ADDRESS_FIELD)}.')
 
@@ -473,7 +473,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
         event_type = UPDATE_USER_EVENT_TYPE
         event_details = 'Forced User Sync'
         workday_user[OLD_USER_DATA_FIELD] = demisto_user
-        demisto_user[FORCE_SYNC_FIELD] = 'false'
+        demisto_user[FORCE_SYNC_FIELD] = False
 
     else:
         demisto.debug(f'Could not detect changes in report for user with email address {user_email} - skipping.')
