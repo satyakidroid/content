@@ -7,6 +7,7 @@ import requests
 import re
 import dateparser
 
+USERNAME_FIELD = 'username'
 EMAIL_ADDRESS_FIELD = 'email'
 EMPLOYEE_ID_FIELD = 'employeeid'
 IS_PROCESSED_FIELD = 'isprocessed'
@@ -20,6 +21,7 @@ REHIRED_EMPLOYEE_FIELD = 'rehiredemployee'
 HIRE_DATE_FIELD = 'hiredate'
 AD_ACCOUNT_STATUS_FIELD = 'adaccountstatus'
 OLD_USER_DATA_FIELD = 'olduserdata'
+MERGED_USER_PROFILE_FIELD = 'mergeduserprofile'
 SOURCE_PRIORITY_FIELD = 'sourcepriority'
 SOURCE_OF_TRUTH_FIELD = 'sourceoftruth'
 CONVERSION_HIRE_FIELD = 'conversionhire'
@@ -191,37 +193,23 @@ def is_termination_event(workday_user, demisto_user, deactivation_date_field, fi
     return False
 
 
-def is_display_name_already_taken(demisto_user, workday_user, display_name_to_user_profile):
+def is_display_name_already_taken(workday_user, display_name_to_user_profile):
     user_display_name = workday_user.get(DISPLAY_NAME_FIELD)
     demisto_users_by_display_name = display_name_to_user_profile.get(user_display_name)
-
     if demisto_users_by_display_name is None:
-        return False
+        return None
 
-    if demisto_user is None:
-        demisto.debug(f'Detected a potential new hire for user with email address '
-                      f'{workday_user.get(EMAIL_ADDRESS_FIELD)}, but display name is already taken. '
-                      f'Please review the incident.')
-        return True
+    demisto.debug(f'Detected an IAM - New Hire event for user with email address '
+                  f'{workday_user.get(EMAIL_ADDRESS_FIELD)}, but its display name is already taken. '
+                  f'Please review the incident.')
 
-    display_name_is_taken_by_another_user = False
-    is_display_name_change = True
-
-    for user in demisto_users_by_display_name:
-        if user.get(EMPLOYEE_ID_FIELD) == demisto_user.get(EMPLOYEE_ID_FIELD):
-            # user already exists with this display name in XSOAR
-            is_display_name_change = False
-
-        if user.get(EMPLOYEE_ID_FIELD) != demisto_user.get(EMPLOYEE_ID_FIELD) \
-                and user.get(AD_ACCOUNT_STATUS_FIELD, '') != 'Disabled':
-            display_name_is_taken_by_another_user = True
-
-    if display_name_is_taken_by_another_user and is_display_name_change:
-        demisto.debug(f'Detected an event for user with email address '
-                      f'{workday_user.get(EMAIL_ADDRESS_FIELD)}, but its display name is already taken. '
-                      f'Please review the incident.')
-        return True
-    return False
+    existing_user = demisto_users_by_display_name[0]
+    merged_user_profile = workday_user.copy()
+    merged_user_profile.update({
+        EMAIL_ADDRESS_FIELD: existing_user.get(EMAIL_ADDRESS_FIELD),
+        USERNAME_FIELD: existing_user.get(USERNAME_FIELD)
+    })
+    return merged_user_profile
 
 
 def is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
@@ -368,13 +356,14 @@ def get_orphan_users_events(user_emails, source_priority):
             email_to_user_profile[email][EMPLOYMENT_STATUS_FIELD] = 'Terminated'
             entry = {
                 'Email_Address': email,
-                'UserProfile': email_to_user_profile[email],
-                'Emp_ID': email_to_user_profile[email].get(EMPLOYEE_ID_FIELD)
+                USER_PROFILE_INC_FIELD: email_to_user_profile[email],
+                'Emp_ID': email_to_user_profile[email].get(EMPLOYEE_ID_FIELD),
+                TERMINATION_TRIGGER_FIELD: 'Orphan'
             }
             event = {
                 'name': email,
                 'rawJSON': json.dumps(entry),
-                'type': DEFAULT_INCIDENT_TYPE,
+                'type': TERMINATE_USER_EVENT_TYPE,
                 'details': 'An orphan user was detected (could not find the user in Workday report). '
                            'Please review and terminate if necessary.'
             }
@@ -384,7 +373,7 @@ def get_orphan_users_events(user_emails, source_priority):
     return events
 
 
-def get_profile_changed_fields_str(demisto_user, workday_user):
+def get_profile_changed_fields(demisto_user, workday_user):
     if not demisto_user:
         return None, None
     changed_fields = {}
@@ -393,8 +382,7 @@ def get_profile_changed_fields_str(demisto_user, workday_user):
         if (workday_value and not demisto_user.get(field)) or workday_value != demisto_user.get(field):
             changed_fields[field] = workday_value
 
-    changed_fields_str = '\n'.join([f'{k} field was updated to "{v}".' for k, v in changed_fields.items()])
-    return changed_fields, changed_fields_str
+    return changed_fields
 
 
 def is_valid_source_of_truth(demisto_user, source_priority):
@@ -430,8 +418,8 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
         event: The event details.
     """
     user_email = workday_user.get(EMAIL_ADDRESS_FIELD)
-    changed_fields, changed_fields_str = get_profile_changed_fields_str(demisto_user, workday_user)
-    demisto.debug(f'{changed_fields_str=}')
+    changed_fields = get_profile_changed_fields(demisto_user, workday_user)
+    demisto.debug(f'{changed_fields=}')
 
     if not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
             or new_hire_email_already_taken(workday_user, demisto_user, email_to_user_profile) \
@@ -443,6 +431,11 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
     if is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
         event_type = NEW_HIRE_EVENT_TYPE
         event_details = 'The user has been hired.'
+
+        if merged_user_profile := is_display_name_already_taken(workday_user, display_name_to_user_profile):
+            workday_user[MERGED_USER_PROFILE_FIELD] = merged_user_profile
+            event_type = DEFAULT_INCIDENT_TYPE
+            event_details = 'Detected an IAM - New Hire event, but display name already exists. Please review.'
 
     elif is_ad_activation_event(demisto_user, workday_user, days_before_hire_to_enable_ad):
         event_type = ACTIVATE_AD_EVENT_TYPE
@@ -462,12 +455,13 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
     elif is_update_event(workday_user, changed_fields):
         event_type = UPDATE_USER_EVENT_TYPE
+        changed_fields_str = '\n'.join([f'{k} field was updated to "{v}".' for k, v in changed_fields.items()])
         event_details = f'The user has been updated:\n{changed_fields_str}'
         workday_user[OLD_USER_DATA_FIELD] = demisto_user
 
         if demisto_user.get(SOURCE_PRIORITY_FIELD) != source_priority:
             workday_user[CONVERSION_HIRE_FIELD] = True
-            event_details = f'A conversion hire was detected:\n{changed_fields_str}'
+            event_details += '\n\nNote: a conversion hire was detected.'
 
     else:
         demisto.debug(f'Could not detect changes in report for user with email address {user_email} - skipping.')
@@ -475,13 +469,6 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
     if is_tufe_user(demisto_user) and event_type != REHIRE_USER_EVENT_TYPE:
         return None
-
-    if is_display_name_already_taken(demisto_user, workday_user, display_name_to_user_profile) \
-            and event_type in [NEW_HIRE_EVENT_TYPE, REHIRE_USER_EVENT_TYPE, UPDATE_USER_EVENT_TYPE]:
-        event_details = f'Detected an "{event_type}" event, but display name already exists. Please review.'
-        if changed_fields:
-            event_details += f'\n{changed_fields_str}'
-        event_type = DEFAULT_INCIDENT_TYPE
 
     entry[USER_PROFILE_INC_FIELD] = {**(demisto_user or {}), **workday_user}
 
@@ -586,7 +573,7 @@ def fetch_samples(client, mapper_in, report_url, workday_date_format):
             workday_user = convert_incident_fields_to_cli_names(workday_user)
             reformat_date_fields(workday_user, workday_date_format)
 
-            entry['UserProfile'] = workday_user
+            entry[USER_PROFILE_INC_FIELD] = workday_user
             event = {
                 "name": workday_user.get(EMAIL_ADDRESS_FIELD),
                 "rawJSON": json.dumps(entry),
