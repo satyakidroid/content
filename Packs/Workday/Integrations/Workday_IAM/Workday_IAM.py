@@ -11,6 +11,7 @@ USERNAME_FIELD = 'username'
 EMAIL_ADDRESS_FIELD = 'email'
 EMPLOYEE_ID_FIELD = 'employeeid'
 IS_PROCESSED_FIELD = 'isprocessed'
+FORCE_SYNC_FIELD = 'forcesync'
 DISPLAY_NAME_FIELD = 'displayname'
 LAST_DAY_OF_WORK_FIELD = 'lastdayofwork'
 TERMINATION_DATE_FIELD = 'terminationdate'
@@ -304,6 +305,11 @@ def is_update_event(workday_user, changed_fields):
     return False
 
 
+def should_force_sync(demisto_user):
+    if demisto_user and demisto_user.get(FORCE_SYNC_FIELD, '').lower() == 'true':
+        demisto.debug(f'Forcing user sync for user '
+                      f'with email address {demisto_user.get(EMAIL_ADDRESS_FIELD)}.')
+
 def get_all_user_profiles():
     query = f'type:\"{USER_PROFILE_INDICATOR}\"'
     display_name_to_user_profile: Dict[str, List[Dict]] = {}
@@ -462,6 +468,12 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
         if demisto_user.get(SOURCE_PRIORITY_FIELD) != source_priority:
             workday_user[CONVERSION_HIRE_FIELD] = True
             event_details += '\n\nNote: a conversion hire was detected.'
+
+    elif should_force_sync(demisto_user):
+        event_type = UPDATE_USER_EVENT_TYPE
+        event_details = 'Forced User Sync'
+        workday_user[OLD_USER_DATA_FIELD] = demisto_user
+        demisto_user[FORCE_SYNC_FIELD] = 'false'
 
     else:
         demisto.debug(f'Could not detect changes in report for user with email address {user_email} - skipping.')
