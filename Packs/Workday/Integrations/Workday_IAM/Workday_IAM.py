@@ -249,8 +249,7 @@ def is_rehire_event(demisto_user, workday_user, changed_fields, deactivation_dat
     today = datetime.today()
 
     if prehire_flag is True and is_rehired_employee and changed_fields \
-            or (deactivation_date_field in changed_fields \
-                and (not deactivation_date or deactivation_date > today)):
+            or (deactivation_date_field in changed_fields and (not deactivation_date or deactivation_date > today)):
         demisto.debug(f'A rehire event was detected for user '
                       f'with email address {workday_user.get(EMAIL_ADDRESS_FIELD)}.')
         return True
@@ -319,6 +318,7 @@ def should_force_sync(demisto_user):
     if demisto_user and demisto_user.get(FORCE_SYNC_FIELD) is True:
         demisto.debug(f'Forcing user sync for user '
                       f'with email address {demisto_user.get(EMAIL_ADDRESS_FIELD)}.')
+
 
 def get_all_user_profiles():
     query = f'type:\"{USER_PROFILE_INDICATOR}\"'
@@ -716,8 +716,7 @@ def test_module(client, is_fetch, report_url, mapper_in, workday_date_format,
             source_priority=source_priority,
             last_run={},
             fetch_limit=1,
-            processed_entries_percentage_per_fetch=50,
-            fetch_orphans_mode=False
+            processed_entries_percentage_per_fetch=50
         )
 
     return 'ok'
