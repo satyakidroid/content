@@ -182,7 +182,7 @@ def is_termination_event(workday_user, demisto_user, deactivation_date_field, fi
     employment_status = workday_user.get(EMPLOYMENT_STATUS_FIELD, '').lower()
 
     if (deactivation_date := workday_user.get(deactivation_date_field)):
-        deactivation_date = dateparser.parse(workday_user.get(deactivation_date_field))
+        deactivation_date = dateparser.parse(deactivation_date)
     today = datetime.today()
 
     if (employment_status == 'terminated' and prehire_flag is False) \
@@ -245,7 +245,7 @@ def is_rehire_event(demisto_user, workday_user, changed_fields, deactivation_dat
     is_rehired_employee = workday_user.get(REHIRED_EMPLOYEE_FIELD, '').lower() == 'yes'
 
     if (deactivation_date := workday_user.get(deactivation_date_field)):
-        deactivation_date = dateparser.parse(workday_user.get(deactivation_date_field))
+        deactivation_date = dateparser.parse(deactivation_date)
     today = datetime.today()
 
     if prehire_flag is True and is_rehired_employee and changed_fields \
@@ -318,6 +318,8 @@ def should_force_sync(demisto_user):
     if demisto_user and demisto_user.get(FORCE_SYNC_FIELD) is True:
         demisto.debug(f'Forcing user sync for user '
                       f'with email address {demisto_user.get(EMAIL_ADDRESS_FIELD)}.')
+        return True
+    return False
 
 
 def get_all_user_profiles():
