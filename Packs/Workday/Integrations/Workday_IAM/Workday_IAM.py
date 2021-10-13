@@ -452,7 +452,6 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
         if merged_user_profile := is_display_name_already_taken(workday_user, display_name_to_user_profile):
             workday_user[MERGED_USER_PROFILE_FIELD] = merged_user_profile
-            event_type = DEFAULT_INCIDENT_TYPE
             event_details = 'Detected an IAM - New Hire event, but display name already exists. Please review.'
 
     elif is_ad_activation_event(demisto_user, workday_user, days_before_hire_to_enable_ad):
