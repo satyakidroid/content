@@ -310,7 +310,7 @@ def generate_changed_field_str(changed_fields):
     for field, change in changed_fields.items():
         changed_fields_str += f'{field} field was updated '
         if change.get('from'):
-            changed_fields_str += f'from {change["from"]} '
+            changed_fields_str += f'from "{change["from"]}" '
         changed_fields_str += f'to "{change["to"]}".\n'
     return changed_fields_str
 
@@ -348,11 +348,11 @@ def get_all_user_profiles():
 
 def get_demisto_user(email_to_user_profile, employee_id_to_user_profile, workday_user):
     demisto_user = None
-    if (employee_id := workday_user.get(EMPLOYEE_ID_FIELD)):
-        demisto_user = employee_id_to_user_profile.get(employee_id)
+    if (email := workday_user.get(EMAIL_ADDRESS_FIELD)):
+        demisto_user = email_to_user_profile.get(email)
     if not demisto_user:
-        if (email := workday_user.get(EMAIL_ADDRESS_FIELD)):
-            demisto_user = email_to_user_profile.get(email)
+        if (employee_id := workday_user.get(EMPLOYEE_ID_FIELD)):
+            demisto_user = employee_id_to_user_profile.get(employee_id)
 
     return demisto_user
 
