@@ -166,7 +166,7 @@ def is_tufe_user(demisto_user):
 
 
 def is_event_processed(demisto_user, changed_fields):
-    if changed_fields is None and demisto_user.get(IS_PROCESSED_FIELD) is True:
+    if changed_fields is None and demisto_user is not None and demisto_user.get(IS_PROCESSED_FIELD) is True:
         demisto.debug(f'Dropping event for user with email {demisto_user.get(EMAIL_ADDRESS_FIELD)} '
                       f'as it is currently being processed.')
         return True
