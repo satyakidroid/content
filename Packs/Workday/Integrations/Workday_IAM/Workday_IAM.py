@@ -437,9 +437,9 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
     changed_fields = get_profile_changed_fields(demisto_user, workday_user)
     demisto.debug(f'{changed_fields=}')
 
-    if not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
+    if is_report_missing_required_user_data(workday_user) \
+            or not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
             or new_hire_email_already_taken(workday_user, demisto_user, email_to_user_profile) \
-            or is_report_missing_required_user_data(workday_user) \
             or not is_valid_source_of_truth(demisto_user, source_priority) \
             or is_event_processed(demisto_user, changed_fields):
         return None
