@@ -165,8 +165,8 @@ def is_tufe_user(demisto_user):
     return False
 
 
-def is_event_processed(demisto_user):
-    if demisto_user is not None and demisto_user.get(IS_PROCESSED_FIELD) is True:
+def is_event_processed(demisto_user, changed_fields):
+    if changed_fields is None and demisto_user.get(IS_PROCESSED_FIELD) is True:
         demisto.debug(f'Dropping event for user with email {demisto_user.get(EMAIL_ADDRESS_FIELD)} '
                       f'as it is currently being processed.')
         return True
@@ -305,6 +305,16 @@ def is_update_event(workday_user, changed_fields):
     return False
 
 
+def generate_changed_field_str(changed_fields):
+    changed_fields_str = ''
+    for field, change in changed_fields.items():
+        changed_fields_str += f'{field} field was updated '
+        if change.get('from'):
+            changed_fields_str += f'from {change["from"]} '
+        changed_fields_str += f'to "{change["to"]}".\n'
+    return changed_fields_str
+
+
 def should_force_sync(demisto_user):
     if demisto_user and demisto_user.get(FORCE_SYNC_FIELD) is True:
         demisto.debug(f'Forcing user sync for user '
@@ -386,7 +396,7 @@ def get_profile_changed_fields(demisto_user, workday_user):
 
     for field, workday_value in workday_user.items():
         if (workday_value and not demisto_user.get(field)) or workday_value != demisto_user.get(field):
-            changed_fields[field] = workday_value
+            changed_fields[field] = {'from': demisto_user.get(field), 'to': workday_value}
 
     return changed_fields
 
@@ -431,7 +441,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
             or new_hire_email_already_taken(workday_user, demisto_user, email_to_user_profile) \
             or is_report_missing_required_user_data(workday_user) \
             or not is_valid_source_of_truth(demisto_user, source_priority) \
-            or is_event_processed(demisto_user):
+            or is_event_processed(demisto_user, changed_fields):
         return None
 
     if is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
@@ -461,7 +471,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
     elif is_update_event(workday_user, changed_fields):
         event_type = UPDATE_USER_EVENT_TYPE
-        changed_fields_str = '\n'.join([f'{k} field was updated to "{v}".' for k, v in changed_fields.items()])
+        changed_fields_str = generate_changed_field_str(changed_fields)
         event_details = f'The user has been updated:\n{changed_fields_str}'
         workday_user[OLD_USER_DATA_FIELD] = demisto_user
 
