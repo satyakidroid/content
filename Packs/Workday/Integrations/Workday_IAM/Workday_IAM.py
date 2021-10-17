@@ -195,6 +195,10 @@ def is_termination_event(workday_user, demisto_user, deactivation_date_field, fi
     return False
 
 
+def is_temporary_demisto_user(demisto_user):
+    return demisto_user and demisto_user.get(TEMP_USER_PROFILE_FIELD) is True
+
+
 def is_display_name_already_taken(workday_user, display_name_to_user_profile):
     user_display_name = workday_user.get(DISPLAY_NAME_FIELD)
     demisto_users_by_display_name = display_name_to_user_profile.get(user_display_name)
@@ -451,14 +455,20 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
             or is_event_processed(demisto_user, changed_fields):
         return None
 
-    if demisto_user and demisto_user.get(TEMP_USER_PROFILE_FIELD) is True:
-        merged_user_profile = is_display_name_already_taken(workday_user, display_name_to_user_profile)
-        if changed_fields and merged_user_profile:
+    if is_temporary_demisto_user(demisto_user):
+        # We update temporary users only if there was an update in the report entry.
+        # Otherwise, we drop the event as there is an active incident waiting for a manual action.
+
+        if not changed_fields:
+            return None
+
+        if merged_user_profile := is_display_name_already_taken(workday_user, display_name_to_user_profile):
             event_type = NEW_HIRE_EVENT_TYPE
             workday_user[MERGED_USER_PROFILE_FIELD] = merged_user_profile
             event_details = 'Detected an IAM - New Hire event, but display name already exists. Please review.'
             event_details += f'\n{changed_fields_str}'
-        elif changed_fields:
+
+        else:
             event_type = UPDATE_USER_EVENT_TYPE
             event_details = f'The user has been updated:\n{changed_fields_str}'
             workday_user[OLD_USER_DATA_FIELD] = demisto_user
@@ -466,8 +476,6 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
             if demisto_user.get(SOURCE_PRIORITY_FIELD) != source_priority:
                 workday_user[CONVERSION_HIRE_FIELD] = True
                 event_details += '\n\nNote: a conversion hire was detected.'
-        else:
-            return None
 
     elif is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
         event_type = NEW_HIRE_EVENT_TYPE
