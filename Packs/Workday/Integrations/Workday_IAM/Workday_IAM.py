@@ -23,6 +23,7 @@ HIRE_DATE_FIELD = 'hiredate'
 AD_ACCOUNT_STATUS_FIELD = 'adaccountstatus'
 OLD_USER_DATA_FIELD = 'olduserdata'
 MERGED_USER_PROFILE_FIELD = 'mergeduserprofile'
+TEMP_USER_PROFILE_FIELD = 'temporaryuserprofile'
 SOURCE_PRIORITY_FIELD = 'sourcepriority'
 SOURCE_OF_TRUTH_FIELD = 'sourceoftruth'
 CONVERSION_HIRE_FIELD = 'conversionhire'
@@ -305,6 +306,9 @@ def is_update_event(workday_user, changed_fields):
 
 
 def generate_changed_field_str(changed_fields):
+    if not changed_fields:
+        return None
+
     changed_fields_str = ''
     for field, change in changed_fields.items():
         changed_fields_str += f'{field} field was updated '
@@ -393,7 +397,7 @@ def get_orphan_users_events(user_emails, source_priority):
 
 def get_profile_changed_fields(demisto_user, workday_user):
     if not demisto_user:
-        return None, None
+        return None
     changed_fields = {}
 
     for field, workday_value in workday_user.items():
@@ -437,6 +441,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
     """
     user_email = workday_user.get(EMAIL_ADDRESS_FIELD)
     changed_fields = get_profile_changed_fields(demisto_user, workday_user)
+    changed_fields_str = generate_changed_field_str(changed_fields)
     demisto.debug(f'{changed_fields=}')
 
     if is_report_missing_required_user_data(workday_user) \
@@ -446,13 +451,33 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
             or is_event_processed(demisto_user, changed_fields):
         return None
 
-    if is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
+    if demisto_user and demisto_user.get(TEMP_USER_PROFILE_FIELD) is True:
+        merged_user_profile = is_display_name_already_taken(workday_user, display_name_to_user_profile)
+        if changed_fields and merged_user_profile:
+            event_type = NEW_HIRE_EVENT_TYPE
+            workday_user[MERGED_USER_PROFILE_FIELD] = merged_user_profile
+            event_details = 'Detected an IAM - New Hire event, but display name already exists. Please review.'
+            event_details += f'\n{changed_fields_str}'
+        elif changed_fields:
+            event_type = UPDATE_USER_EVENT_TYPE
+            event_details = f'The user has been updated:\n{changed_fields_str}'
+            workday_user[OLD_USER_DATA_FIELD] = demisto_user
+
+            if demisto_user.get(SOURCE_PRIORITY_FIELD) != source_priority:
+                workday_user[CONVERSION_HIRE_FIELD] = True
+                event_details += '\n\nNote: a conversion hire was detected.'
+        else:
+            return None
+
+    elif is_new_hire_event(demisto_user, workday_user, deactivation_date_field):
         event_type = NEW_HIRE_EVENT_TYPE
         event_details = 'The user has been hired.'
 
         if merged_user_profile := is_display_name_already_taken(workday_user, display_name_to_user_profile):
             workday_user[MERGED_USER_PROFILE_FIELD] = merged_user_profile
             event_details = 'Detected an IAM - New Hire event, but display name already exists. Please review.'
+            if changed_fields is not None:
+                event_details += f'\n{changed_fields_str}'
 
     elif is_ad_activation_event(demisto_user, workday_user, days_before_hire_to_enable_ad):
         event_type = ACTIVATE_AD_EVENT_TYPE
@@ -472,7 +497,6 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
 
     elif is_update_event(workday_user, changed_fields):
         event_type = UPDATE_USER_EVENT_TYPE
-        changed_fields_str = generate_changed_field_str(changed_fields)
         event_details = f'The user has been updated:\n{changed_fields_str}'
         workday_user[OLD_USER_DATA_FIELD] = demisto_user
 
