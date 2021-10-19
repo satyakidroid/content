@@ -167,7 +167,7 @@ def is_tufe_user(demisto_user):
 
 
 def is_event_processed(demisto_user, changed_fields):
-    if changed_fields is None and demisto_user is not None and demisto_user.get(IS_PROCESSED_FIELD) is True:
+    if not changed_fields and demisto_user is not None and demisto_user.get(IS_PROCESSED_FIELD) is True:
         demisto.debug(f'Dropping event for user with email {demisto_user.get(EMAIL_ADDRESS_FIELD)} '
                       f'as it is currently being processed.')
         return True
@@ -681,6 +681,7 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
     if not last_run.get('report_entries', []):
         if user_emails := last_run.get('user_emails', []):
             last_run['orphan_users_events'] = get_orphan_users_events(user_emails, source_priority)
+            last_run['user_emails'] = []
 
         if orphan_user_events := last_run.get('orphan_users_events'):
             last_run['orphan_users_events'] = orphan_user_events[fetch_limit:]
@@ -692,8 +693,7 @@ def fetch_incidents(client, mapper_in, report_url, workday_date_format, deactiva
 
         last_run.update({
             'report_entries': report_entries,
-            'number_of_entries_to_process': len(report_entries) * processed_entries_percentage_per_fetch,
-            'user_emails': []
+            'number_of_entries_to_process': len(report_entries) * processed_entries_percentage_per_fetch
         })
 
     events, unprocessed_report_entries = process_report_entries(
