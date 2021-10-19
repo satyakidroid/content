@@ -132,7 +132,11 @@ def has_reached_threshold_date(num_of_days_before_hire, workday_user):
     hire_date = dateparser.parse(workday_user.get(HIRE_DATE_FIELD)).date()
     today = datetime.today().date()
     delta = (hire_date - today).days
-    if delta > num_of_days_before_hire:
+    return delta <= num_of_days_before_hire
+
+
+def is_user_ready_for_first_sync(num_of_days_before_hire, workday_user, demisto_user):
+    if not demisto_user and not has_reached_threshold_date(num_of_days_before_hire, workday_user):
         demisto.debug(f'Skipped creating an incident for user '
                       f'with email address {workday_user.get(EMAIL_ADDRESS_FIELD)} - '
                       f'the hire date of the employee is in more than {num_of_days_before_hire} days.')
@@ -449,7 +453,7 @@ def get_event_details(entry, workday_user, demisto_user, days_before_hire_to_syn
     demisto.debug(f'{changed_fields=}')
 
     if is_report_missing_required_user_data(workday_user) \
-            or not has_reached_threshold_date(days_before_hire_to_sync, workday_user) \
+            or not is_user_ready_for_first_sync(days_before_hire_to_sync, workday_user, demisto_user) \
             or new_hire_email_already_taken(workday_user, demisto_user, email_to_user_profile) \
             or not is_valid_source_of_truth(demisto_user, source_priority) \
             or is_event_processed(demisto_user, changed_fields):
