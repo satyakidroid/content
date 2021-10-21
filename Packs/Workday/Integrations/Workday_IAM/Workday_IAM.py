@@ -120,7 +120,7 @@ def get_workday_user_from_entry(entry, mapper_in, workday_date_format, source_pr
     reformat_date_fields(workday_user, workday_date_format)
 
     workday_user[SOURCE_PRIORITY_FIELD] = source_priority
-    workday_user[SOURCE_OF_TRUTH_FIELD] = 'Workday IAM'
+    workday_user[SOURCE_OF_TRUTH_FIELD] = 'Workday'
 
     return workday_user
 
